@@ -29,17 +29,12 @@ def consumer(consumer_id):
             print(f"Потребитель {consumer_id}: обработал событие {event}.")
         time.sleep(1)
 
-
-
 thread_provider = threading.Thread(target=provider, daemon=True)
-
 
 thread_consumers = [
     threading.Thread(target=consumer, args=(i,), daemon=True)
     for i in range(1, 4)
 ]
-
-
 thread_provider.start()
 for thread in thread_consumers:
     thread.start()
