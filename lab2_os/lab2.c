@@ -11,8 +11,35 @@
 #define BUFFER_SIZE 1024
 
 volatile sig_atomic_t wasSigHup = 0;
+sigset_t origMask;
 
 void handleSigHup(int sig) { wasSigHup = 1; }
+
+
+void setup_signal_handler() {
+    struct sigaction sa;
+    sigset_t blockedMask;
+
+   
+    sa.sa_handler = handleSigHup;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+
+    if (sigaction(SIGHUP, &sa, NULL) < 0) {
+        perror("Ошибка настройки обработчика сигнала");
+        exit(EXIT_FAILURE);
+    }
+
+    
+    sigemptyset(&blockedMask);
+    sigaddset(&blockedMask, SIGHUP);
+
+    if (sigprocmask(SIG_BLOCK, &blockedMask, &origMask) < 0) {
+        perror("Ошибка настройки маски сигналов");
+        exit(EXIT_FAILURE);
+    }
+}
+
 
 int create_server_socket(int port) {
     int server_fd;
@@ -24,15 +51,6 @@ int create_server_socket(int port) {
         exit(EXIT_FAILURE);
     }
     return server_fd;
-}
-
-void configure_signal_handler() {
-    struct sigaction sa = {.sa_handler = handleSigHup, .sa_flags = SA_RESTART};
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGHUP, &sa, NULL) < 0) {
-        perror("Ошибка настройки обработчика сигнала");
-        exit(EXIT_FAILURE);
-    }
 }
 
 int establish_client_connection(int server_fd) {
@@ -58,10 +76,18 @@ ssize_t receive_data(int client_fd, char *buffer) {
     return bytes_read;
 }
 
+void handle_sighup() {
+    if (wasSigHup) {
+        printf("Получен сигнал SIGHUP\n");
+        wasSigHup = 0;
+    }
+}
+
+
 int main() {
     int server_fd = create_server_socket(PORT), client_fd = -1;
     char buffer[BUFFER_SIZE];
-    configure_signal_handler();
+    setup_signal_handler();
 
     while (1) {
         fd_set read_fds;
@@ -69,10 +95,9 @@ int main() {
         FD_SET(server_fd, &read_fds);
         if (client_fd != -1) FD_SET(client_fd, &read_fds);
 
-        if (pselect((client_fd > server_fd ? client_fd : server_fd) + 1, &read_fds, NULL, NULL, NULL, NULL) < 0) {
-            if (errno == EINTR && wasSigHup) {
-                printf("Получен сигнал SIGHUP\n");
-                wasSigHup = 0;
+        if (pselect((client_fd > server_fd ? client_fd : server_fd) + 1, &read_fds, NULL, NULL, NULL, &origMask) < 0) {
+            if (errno == EINTR) {
+                handle_sighup();
                 continue;
             }
             perror("Ошибка в pselect");
